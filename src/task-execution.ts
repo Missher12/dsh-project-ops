@@ -35,6 +35,7 @@ export interface ReceiptInput {
   nestedCallId: string
   startedAt: string
   durationMs: number
+  executionMode?: ExecutionMode
   result?: ReceiptResult
 }
 
@@ -134,7 +135,7 @@ export function createReceipt(input: ReceiptInput): ExecutionReceipt {
   const code = foregroundExitCode(input.result)
   return {
     ...receiptBase(input.task, input.startedAt, input.durationMs),
-    executionMode: 'foreground',
+    executionMode: input.executionMode ?? 'foreground',
     ...input.executorTool === undefined ? {} : { executorTool: input.executorTool },
     nestedCallId: input.nestedCallId,
     outcome: foregroundOutcome(input),

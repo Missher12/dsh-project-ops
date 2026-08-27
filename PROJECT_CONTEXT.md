@@ -38,5 +38,5 @@
 
 ## 已知问题
 
-- 发布前需对固定 Harness `0.1.1-rc.2` 完成 macOS 原生验收。
-- Windows `pwsh` 代码路径有单元测试，但在独立仓库 CI 通过前不声明 Windows 原生支持。
+- 已对固定 Harness `0.1.1-rc.2` 完成本地 macOS 验收，以及 GitHub 托管 macOS、Windows 和 Linux 的完整包生命周期 CI。
+- Windows ARM 和其他未列出架构没有稳定验收 runner，不声明支持。

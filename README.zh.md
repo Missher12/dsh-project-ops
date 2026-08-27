@@ -101,5 +101,5 @@ Bundle 只检查以下项目根目录候选：
 
 `node scripts/smoke.mjs` 会按精确白名单打包，扫描源码路径和疑似密钥文本，把归档安装到临时 `DSH_HOME`，
 组合临时 Profile，执行安装后插件发现的临时 package 任务并检查回执，再卸载 Bundle，并用仅哈希的顶层哨兵
-比较真实 `~/.dsh`。smoke 最后删除全部临时状态。本版本已有 macOS 执行证据；`pwsh` 路径已实现并通过单元
-测试，但不宣称已经完成 Windows 原生验收。
+比较真实 `~/.dsh`。smoke 最后删除全部临时状态。`0.1.2` 已在 GitHub 托管的 macOS、Windows 和 Linux runner 上通过这套完整生命周期，
+并另有本地 macOS 验收证据。Windows ARM 和其他未列出的架构仍保持未验证。

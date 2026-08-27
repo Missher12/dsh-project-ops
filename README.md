@@ -105,5 +105,5 @@ Task arguments are deliberately unsupported in this release.
 `node scripts/smoke.mjs` packs an exact file whitelist, scans it for source paths and secret-shaped text, installs the archive
 under a temporary `DSH_HOME`, composes a temporary Profile, exercises an installed temporary package task and its receipt,
 removes the Bundle, and compares a hash-only top-level sentinel for the live `~/.dsh` directory. The smoke deletes its
-temporary state. This release has macOS execution evidence; the `pwsh` path is implemented and unit-tested but has not been
-claimed as native Windows acceptance.
+temporary state. Version `0.1.2` passed this lifecycle on GitHub-hosted macOS, Windows, and Linux runners, in addition to local
+macOS acceptance. Windows ARM and other unlisted architectures remain unverified.

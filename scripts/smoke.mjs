@@ -43,6 +43,7 @@ function run(command, args, options = {}) {
     env: options.env ?? process.env,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    shell: options.shell ?? false,
   })
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) {
@@ -134,6 +135,7 @@ const profile = 'project-ops-smoke'
 const liveHome = join(homedir(), '.dsh')
 const liveBefore = directorySentinel(liveHome)
 const cli = [dshCli]
+const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const isolatedEnv = { ...process.env, DSH_HOME: temporaryHome }
 
 try {
@@ -152,7 +154,10 @@ try {
   }
   invariant(readFileSync(join(pluginRoot, 'cordis.patch.yml'), 'utf8') === expectedPatch, 'Bundle patch is not exact')
 
-  const packed = JSON.parse(run('npm', ['pack', '--json', '--pack-destination', packDir], { cwd: pluginRoot }))
+  const packed = JSON.parse(run(npmCommand, ['pack', '--json', '--pack-destination', packDir], {
+    cwd: pluginRoot,
+    shell: process.platform === 'win32',
+  }))
   invariant(Array.isArray(packed) && packed.length === 1, 'npm pack returned an unexpected manifest')
   const archive = join(packDir, packed[0].filename)
   const entries = run('tar', ['-tzf', archive]).trim().split('\n').sort()

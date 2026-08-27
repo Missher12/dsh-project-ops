@@ -250,7 +250,7 @@ describe('Project Ops Cordis plugin', () => {
 
     expect(ran.isError).toBe(false)
     expect((ran as { value: { receipt: { executionMode: string; outcome: string; jobId: string } } }).value.receipt)
-      .toMatchObject({ executionMode: 'background', outcome: 'succeeded', jobId: 'bash-1' })
+      .toMatchObject({ executionMode: 'background', outcome: 'succeeded', jobId: `${platformExecutor}-1` })
     expect(ran.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('short task output') })
   })
 
@@ -301,7 +301,7 @@ describe('Project Ops Cordis plugin', () => {
     const running = (ran as { value: { receipt: {
       jobId: string; nestedCallId: string; startedAt: string; outcome: string
     } } }).value.receipt
-    expect(running).toMatchObject({ outcome: 'running', jobId: 'bash-1' })
+    expect(running).toMatchObject({ outcome: 'running', jobId: `${platformExecutor}-1` })
 
     const foreign = await call(ctx, stranger, 'missher_project_ops_task_collect', {
       taskId: task.id,

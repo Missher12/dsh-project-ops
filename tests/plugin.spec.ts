@@ -14,6 +14,7 @@ import * as ProjectOps from '../src/index.ts'
 
 const roots: string[] = []
 const signal = new AbortController().signal
+const platformExecutor = process.platform === 'win32' ? 'pwsh' : 'bash'
 
 function workspace(): string {
   const root = mkdtempSync(join(tmpdir(), 'dsh-project-ops-'))
@@ -75,13 +76,15 @@ describe('Project Ops Cordis plugin', () => {
     const owner = agent(cwd)
     let nestedCalls = 0
     ctx.tools.register(defineTool({
-      name: 'bash',
+      name: platformExecutor,
       description: 'Test shell.',
-      parameters: {
-        command: { type: 'string', required: true },
-        description: { type: 'string', required: true },
-        workdir: { type: 'string' },
-      },
+      parameters: platformExecutor === 'bash'
+        ? {
+            command: { type: 'string', required: true },
+            description: { type: 'string', required: true },
+            workdir: { type: 'string' },
+          }
+        : { command: { type: 'string', required: true } },
       output: {
         schema: { type: 'object', additionalProperties: true },
         render: () => [{ type: 'text', text: 'ran' }],
@@ -116,13 +119,15 @@ describe('Project Ops Cordis plugin', () => {
     let nested: ToolRunContext | undefined
     let nestedArgs: unknown
     ctx.tools.register(defineTool({
-      name: 'bash',
+      name: platformExecutor,
       description: 'Test shell.',
-      parameters: {
-        command: { type: 'string', required: true },
-        description: { type: 'string', required: true },
-        workdir: { type: 'string' },
-      },
+      parameters: platformExecutor === 'bash'
+        ? {
+            command: { type: 'string', required: true },
+            description: { type: 'string', required: true },
+            workdir: { type: 'string' },
+          }
+        : { command: { type: 'string', required: true } },
       output: {
         schema: { type: 'object', additionalProperties: true },
         render: () => [{ type: 'text', text: 'task output' }],
@@ -149,7 +154,9 @@ describe('Project Ops Cordis plugin', () => {
       signal,
     })
     expect(nested?.parent).toBeDefined()
-    expect(nestedArgs).toMatchObject({ workdir: cwd, description: 'Run declared project task' })
+    expect(nestedArgs).toMatchObject(platformExecutor === 'bash'
+      ? { workdir: cwd, description: 'Run declared project task' }
+      : { command: expect.any(String) })
     expect(ran.content.at(-1)).toMatchObject({ type: 'text', text: expect.stringContaining('"outcome": "succeeded"') })
   })
 

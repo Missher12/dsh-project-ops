@@ -8,13 +8,12 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -68,16 +67,50 @@ function readProfileManifest(home, profile) {
 async function exercisePackedPlugin(entry, workspace) {
   const projectOps = await import(pathToFileURL(entry).href)
   const definitions = new Map()
+  const jobRecords = new Map()
   const signal = new AbortController().signal
+  const shellName = process.platform === 'win32' ? 'pwsh' : 'bash'
+  const shellSchema = {
+    name: shellName,
+    description: 'Smoke shell.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string' },
+        description: { type: 'string' },
+        workdir: { type: 'string' },
+        run_in_background: { type: 'boolean' },
+      },
+    },
+  }
   const fakeFileSystem = {
     async lstat(name, options) {
       const target = resolve(options?.cwd ?? workspace, name)
       if (!existsSync(target)) return undefined
-      const stat = statSync(target)
-      return { type: stat.isFile() ? 'file' : 'directory', size: stat.size }
+      const stat = lstatSync(target)
+      return {
+        type: stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : stat.isDirectory() ? 'directory' : 'other',
+        size: stat.size,
+      }
     },
     async resolve(name, options) {
       return resolve(options?.cwd ?? workspace, name)
+    },
+    contains(parent, child) {
+      const path = relative(parent, child)
+      return path === '' || (!path.startsWith('..') && !isAbsolute(path))
+    },
+    processPath(target) {
+      return target
+    },
+    async listDir(target) {
+      return readdirSync(target, { withFileTypes: true })
+        .sort((left, right) => left.name.localeCompare(right.name, 'en'))
+        .map(entry => ({
+          name: entry.name,
+          type: entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : 'other',
+          target: resolve(target, entry.name),
+        }))
     },
     async readBytes(target, _signal, maximum) {
       const bytes = readFileSync(target)
@@ -89,25 +122,62 @@ async function exercisePackedPlugin(entry, workspace) {
       definitions.set(definition.name, definition)
     },
     get(name) {
-      return name === (process.platform === 'win32' ? 'pwsh' : 'bash') ? { name } : undefined
+      return name === shellName ? shellSchema : definitions.get(name)
     },
     schemas() {
-      return [...definitions.values()]
+      return [...definitions.values(), shellSchema]
     },
     async execute(request) {
       const command = request.arguments.command
       const child = process.platform === 'win32'
-        ? spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', command], { cwd: workspace, encoding: 'utf8' })
+        ? spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', command], { cwd: request.arguments.workdir, encoding: 'utf8' })
         : spawnSync('/bin/bash', ['-lc', command], { cwd: request.arguments.workdir, encoding: 'utf8' })
       if (child.error !== undefined) throw child.error
+      const output = `${child.stdout ?? ''}${child.stderr ?? ''}`
+      if (request.arguments.run_in_background === true) {
+        const jobId = `${shellName}-1`
+        jobRecords.set(jobId, {
+          snapshot: {
+            id: jobId,
+            kind: shellName,
+            label: command,
+            status: 'completed',
+            detail: `exit code: ${child.status ?? 1}`,
+            startedAt: Date.now(),
+            finishedAt: Date.now(),
+            reported: false,
+          },
+          output,
+        })
+        return {
+          isError: false,
+          content: [{ type: 'text', text: `started background job ${jobId}` }],
+          value: { kind: 'background', jobId },
+        }
+      }
       return {
         isError: false,
-        content: [{ type: 'text', text: `${child.stdout ?? ''}${child.stderr ?? ''}` }],
+        content: [{ type: 'text', text: output }],
         value: { kind: 'foreground', exitCode: child.status ?? 1 },
       }
     },
   }
-  projectOps.apply({ fs: fakeFileSystem, tools: fakeTools })
+  const fakeJobs = {
+    async wait(id) {
+      return jobRecords.get(id).snapshot
+    },
+    get(id) {
+      return jobRecords.get(id).snapshot
+    },
+    read(id) {
+      const record = jobRecords.get(id)
+      const text = record.output
+      record.output = ''
+      record.snapshot.reported = true
+      return { text, snapshot: { ...record.snapshot } }
+    },
+  }
+  projectOps.apply({ fs: fakeFileSystem, tools: fakeTools, jobs: fakeJobs })
   const owner = { id: 'project-ops-smoke-agent', session: { header: { cwd: workspace } } }
   const exec = {
     agent: owner,
@@ -117,15 +187,31 @@ async function exercisePackedPlugin(entry, workspace) {
     signal,
   }
   const listed = await definitions.get('missher_project_ops_task_list').execute({}, exec)
-  const task = listed.tasks.find(candidate => candidate.id === 'package:project-ops-smoke')
-  invariant(task !== undefined, 'packed plugin did not discover the temporary package task')
+  invariant(listed.tasks.length === 1, 'packed plugin did not discover exactly one temporary workspace task')
+  const task = listed.tasks.find(candidate => candidate.id === 'package@packages/app:verify')
+  invariant(task !== undefined, 'packed plugin did not discover the temporary workspace task')
+  const planned = await definitions.get('missher_project_ops_task_plan').execute({
+    changedFiles: ['packages/app/src/index.js'],
+    goal: 'verify',
+  }, exec)
+  invariant(planned.tasks.some(candidate => candidate.id === task.id), 'packed plugin did not plan the affected workspace task')
   const result = await definitions.get('missher_project_ops_task_run').execute({
     taskId: task.id,
     manifestDigest: task.manifestDigest,
+    mode: 'auto',
+    waitMs: 100,
   }, exec)
   invariant(result.receipt.outcome === 'succeeded', `packed plugin receipt outcome was ${result.receipt.outcome}`)
   invariant(result.receipt.taskId === task.id, 'packed plugin receipt task id differs')
-  invariant(existsSync(join(workspace, 'project-ops-smoke.marker')), 'temporary package script did not execute')
+  invariant(result.receipt.executionMode === 'background', 'packed plugin did not use the existing background route')
+  const gate = await definitions.get('missher_project_ops_verification_gate').execute({
+    changedFiles: ['packages/app/src/index.js'],
+    goal: 'verify',
+    planDigest: planned.planDigest,
+    receipts: [result.receipt],
+  }, exec)
+  invariant(gate.verdict === 'passed', `packed plugin verification gate was ${gate.verdict}`)
+  invariant(existsSync(join(workspace, 'packages', 'app', 'project-ops-smoke.marker')), 'temporary workspace script did not execute')
 }
 
 const temporaryRoot = mkdtempSync(join(tmpdir(), 'dsh-project-ops-smoke-'))
@@ -195,11 +281,18 @@ try {
     process.platform === 'win32' ? 'junction' : 'dir',
   )
   writeFileSync(join(workspace, 'package.json'), JSON.stringify({
-    name: 'project-ops-smoke-workspace',
+    name: 'project-ops-smoke-root',
     private: true,
     packageManager: 'npm@10.0.0',
+    workspaces: ['packages/*'],
+  }))
+  mkdirSync(join(workspace, 'packages', 'app', 'src'), { recursive: true })
+  writeFileSync(join(workspace, 'packages', 'app', 'src', 'index.js'), 'export {}\n')
+  writeFileSync(join(workspace, 'packages', 'app', 'package.json'), JSON.stringify({
+    name: '@smoke/app',
+    private: true,
     scripts: {
-      'project-ops-smoke': 'node -e "require(\'node:fs\').writeFileSync(\'project-ops-smoke.marker\', \'ran\')"',
+      verify: 'node -e "require(\'node:fs\').writeFileSync(\'project-ops-smoke.marker\', \'ran\')"',
     },
   }))
   const profileDir = join(temporaryHome, 'profiles', profile)
@@ -218,7 +311,7 @@ try {
   invariant(!removed.dsh?.profile?.bundles?.includes('dsh-project-ops'), 'temporary Profile Bundle layer survived removal')
   invariant(directorySentinel(liveHome) === liveBefore, 'live ~/.dsh top-level sentinel changed')
 
-  process.stdout.write('project-ops-smoke: PASS archive, isolated install, composition, task receipt, removal, live-home sentinel\n')
+  process.stdout.write('project-ops-smoke: PASS archive, isolated install, composition, workspace auto receipt, verification gate, removal, live-home sentinel\n')
 } finally {
   rmSync(temporaryRoot, { recursive: true, force: true })
 }

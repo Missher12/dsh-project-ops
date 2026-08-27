@@ -27,9 +27,19 @@ const REASON_ORDER = [
 ] as const
 
 function latestReceipt(receipts: readonly ExecutionReceipt[]): ExecutionReceipt | undefined {
+  const risk: Record<ExecutionReceipt['outcome'], number> = {
+    succeeded: 0,
+    running: 1,
+    failed: 2,
+    blocked: 3,
+    aborted: 4,
+    unavailable: 5,
+  }
   return [...receipts].sort((left, right) => {
     const time = Date.parse(right.startedAt) - Date.parse(left.startedAt)
     if (time !== 0) return time
+    const outcome = risk[right.outcome] - risk[left.outcome]
+    if (outcome !== 0) return outcome
     return JSON.stringify(right).localeCompare(JSON.stringify(left), 'en')
   })[0]
 }

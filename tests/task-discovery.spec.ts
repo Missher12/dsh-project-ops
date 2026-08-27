@@ -197,4 +197,19 @@ describe('project task discovery', () => {
       message: 'Workspace discovery returned the first 64 package directories.',
     })
   })
+
+  test('caps workspace pattern evaluation before directory traversal', async () => {
+    const workspaces = Array.from({ length: 130 }, (_, index) => `group-${String(index).padStart(3, '0')}/*`)
+    const result = await discoverProjectTasks(reader({
+      'package.json': JSON.stringify({ packageManager: 'npm@11.0.0', workspaces }),
+      'group-129/late/package.json': JSON.stringify({ name: 'late', scripts: { test: 'true' } }),
+    }))
+
+    expect(result.tasks).toEqual([])
+    expect(result.diagnostics).toContainEqual({
+      source: 'package',
+      code: 'workspace-pattern-limit',
+      message: 'Workspace discovery evaluated the first 128 patterns.',
+    })
+  })
 })

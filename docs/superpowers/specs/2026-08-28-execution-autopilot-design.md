@@ -16,7 +16,7 @@ Version 0.2 deliberately does not add an autonomous code-review subagent. The cu
 
 The filesystem adapter gains stable directory listing and relative manifest reads. Discovery reads the root `package.json`, then expands only bounded workspace patterns declared by `package.json#workspaces` or `pnpm-workspace.yaml`. Supported patterns contain literal segments, `*`, and a terminal `**`; absolute paths, parent traversal, negation, and malformed patterns are rejected diagnostically.
 
-Traversal is capped at 64 workspaces, depth 8, 256 directories, 1 MiB per manifest, and 256 tasks. Symlink directory entries are not traversed. Root Make and Just tasks remain supported. Nested package tasks inherit the root package manager when their own manifest does not select one.
+Traversal is capped at 64 workspaces, 128 patterns, depth 8, 256 directories, 1 MiB per manifest, and 256 tasks. Symlink directory entries are not traversed. Root Make and Just tasks remain supported. Nested package tasks inherit the root package manager when their own manifest does not select one.
 
 Each task reports its relative workspace, package name when available, purpose (`test`, `lint`, `typecheck`, `build`, `format`, or `other`), and same-purpose dependency task IDs derived from local package dependencies. Existing root package task IDs remain stable; nested IDs include their workspace.
 

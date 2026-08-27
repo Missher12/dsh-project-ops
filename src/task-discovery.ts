@@ -13,6 +13,7 @@ type PackageManager = Extract<TaskInvocation, { kind: 'package' }>['manager']
 export const MAX_MANIFEST_BYTES = 1024 * 1024
 export const MAX_TASKS = 256
 export const MAX_WORKSPACES = 64
+export const MAX_WORKSPACE_PATTERNS = 128
 export const MAX_WORKSPACE_DIRECTORIES = 256
 export const MAX_WORKSPACE_DEPTH = 8
 
@@ -234,19 +235,25 @@ async function workspaceDirectories(
 ): Promise<string[]> {
   const matches = new Set<string>()
   const visited = new Set<string>()
+  const directoryCache = new Map<string, readonly string[]>()
   let directoryLimit = false
 
   async function children(path: string): Promise<readonly string[]> {
     signal?.throwIfAborted()
+    const cached = directoryCache.get(path)
+    if (cached !== undefined) return cached
     if (visited.size >= MAX_WORKSPACE_DIRECTORIES) {
       directoryLimit = true
       return []
     }
     visited.add(path)
     try {
-      return await reader.listDirectories(path, signal)
+      const names = await reader.listDirectories(path, signal)
+      directoryCache.set(path, names)
+      return names
     } catch {
       diagnostics.push(diagnostic('package', 'workspace-read-failed', 'Could not inspect workspace directories.'))
+      directoryCache.set(path, [])
       return []
     }
   }
@@ -274,7 +281,11 @@ async function workspaceDirectories(
     }
   }
 
-  for (const pattern of patterns) {
+  const boundedPatterns = patterns.slice(0, MAX_WORKSPACE_PATTERNS)
+  if (patterns.length > MAX_WORKSPACE_PATTERNS) {
+    diagnostics.push(diagnostic('package', 'workspace-pattern-limit', `Workspace discovery evaluated the first ${MAX_WORKSPACE_PATTERNS} patterns.`))
+  }
+  for (const pattern of boundedPatterns) {
     const segments = patternSegments(pattern)
     if (segments === undefined) {
       diagnostics.push(diagnostic('package', 'unsupported-workspace-pattern', 'Ignored unsupported workspace pattern.'))

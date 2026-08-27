@@ -117,6 +117,18 @@ describe('verification gate', () => {
     })
   })
 
+  test('fails closed when duplicate receipts share the same timestamp', () => {
+    const rows = [task('package:test')]
+    const plan = createTaskPlan(rows, ['src/index.ts'], 'verify')
+    const success = receipt(rows[0]!, 'succeeded')
+    const failure = receipt(rows[0]!, 'failed')
+
+    expect(evaluateVerificationGate(plan, rows, [success, failure])).toMatchObject({
+      verdict: 'failed',
+      failedTaskIds: ['package:test'],
+    })
+  })
+
   test('never projects commands, output, paths, or receipt call metadata', () => {
     const rows = [task('package:test')]
     const plan = createTaskPlan(rows, ['private/source.ts'], 'verify')

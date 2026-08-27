@@ -75,6 +75,23 @@ class HarnessManifestReader implements ManifestReader {
     }
     return found
   }
+
+  async listDirectories(path: string, signal?: AbortSignal): Promise<readonly string[]> {
+    const pathInfo = await this.fs.lstat(path, { cwd: this.cwd }, signal)
+    if (pathInfo?.type !== 'directory') return []
+    const root = await this.fs.resolve('.', { cwd: this.cwd, ...signal === undefined ? {} : { signal } })
+    const directory = await this.fs.resolve(path, { cwd: this.cwd, ...signal === undefined ? {} : { signal } })
+    if (!this.fs.contains(root, directory)) return []
+    const entries = await this.fs.listDir(directory, signal)
+    const names: string[] = []
+    for (const entry of entries) {
+      if (entry.type !== 'directory' || !this.fs.contains(root, entry.target)) continue
+      const candidate = path === '.' ? entry.name : `${path}/${entry.name}`
+      const info = await this.fs.lstat(candidate, { cwd: this.cwd }, signal)
+      if (info?.type === 'directory') names.push(entry.name)
+    }
+    return names
+  }
 }
 
 function sessionCwd(exec: ToolRunContext): string {

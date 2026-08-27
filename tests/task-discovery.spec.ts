@@ -25,6 +25,17 @@ function reader(files: Record<string, string | Uint8Array>): ManifestReader {
         'bun.lockb',
       ].includes(name))
     },
+    async listDirectories(path) {
+      const prefix = path === '.' ? '' : `${path}/`
+      const names = new Set<string>()
+      for (const candidate of Object.keys(files)) {
+        if (!candidate.startsWith(prefix)) continue
+        const remainder = candidate.slice(prefix.length)
+        const separator = remainder.indexOf('/')
+        if (separator > 0) names.add(remainder.slice(0, separator))
+      }
+      return [...names].sort((left, right) => left.localeCompare(right, 'en'))
+    },
   }
 }
 
@@ -104,6 +115,86 @@ describe('project task discovery', () => {
       source: 'all',
       code: 'task-limit',
       message: `Task discovery returned the first ${MAX_TASKS} declarations.`,
+    })
+  })
+
+  test('discovers bounded package workspaces and links same-purpose dependency tasks', async () => {
+    const result = await discoverProjectTasks(reader({
+      'package.json': JSON.stringify({
+        packageManager: 'pnpm@11.7.0',
+        workspaces: ['packages/*'],
+        scripts: { test: 'vitest' },
+      }),
+      'packages/a/package.json': JSON.stringify({
+        name: '@acme/a',
+        scripts: { build: 'tsc', test: 'vitest' },
+      }),
+      'packages/b/package.json': JSON.stringify({
+        name: '@acme/b',
+        dependencies: { '@acme/a': 'workspace:*' },
+        scripts: { build: 'tsc', test: 'vitest', lint: 'eslint .', typecheck: 'tsc --noEmit' },
+      }),
+    }))
+
+    expect(result.tasks.map(task => task.id)).toEqual([
+      'package:test',
+      'package@packages/a:build',
+      'package@packages/a:test',
+      'package@packages/b:build',
+      'package@packages/b:lint',
+      'package@packages/b:test',
+      'package@packages/b:typecheck',
+    ])
+    expect(result.tasks.find(task => task.id === 'package@packages/b:build')).toMatchObject({
+      workspace: 'packages/b',
+      packageName: '@acme/b',
+      purpose: 'build',
+      dependsOn: ['package@packages/a:build'],
+      invocation: { manager: 'pnpm', cwd: 'packages/b' },
+    })
+    expect(result.tasks.find(task => task.id === 'package@packages/b:test')).toMatchObject({
+      purpose: 'test',
+      dependsOn: ['package@packages/a:test'],
+    })
+    expect(result.tasks.find(task => task.id === 'package@packages/b:typecheck')).toMatchObject({ purpose: 'typecheck' })
+    expect(result.diagnostics).toEqual([])
+  })
+
+  test('reads pnpm workspace packages and rejects escaping patterns without traversal', async () => {
+    const result = await discoverProjectTasks(reader({
+      'package.json': JSON.stringify({ packageManager: 'pnpm@11.7.0' }),
+      'pnpm-workspace.yaml': "packages:\n  - 'apps/*'\n  - '../outside/*'\n",
+      'apps/web/package.json': JSON.stringify({ name: '@acme/web', scripts: { build: 'vite build' } }),
+      '../outside/secret/package.json': JSON.stringify({ name: 'secret', scripts: { leak: 'print-secret' } }),
+    }))
+
+    expect(result.tasks.map(task => task.id)).toEqual(['package@apps/web:build'])
+    expect(result.diagnostics).toContainEqual({
+      source: 'package',
+      code: 'unsupported-workspace-pattern',
+      message: 'Ignored unsupported workspace pattern.',
+    })
+    expect(JSON.stringify(result)).not.toContain('secret')
+  })
+
+  test('caps workspace expansion deterministically', async () => {
+    const files: Record<string, string> = {
+      'package.json': JSON.stringify({ packageManager: 'npm@11.0.0', workspaces: ['packages/*'] }),
+    }
+    for (let index = 0; index < 70; index += 1) {
+      const name = `p-${String(index).padStart(2, '0')}`
+      files[`packages/${name}/package.json`] = JSON.stringify({ name, scripts: { test: 'true' } })
+    }
+
+    const result = await discoverProjectTasks(reader(files))
+
+    expect(result.tasks).toHaveLength(64)
+    expect(result.tasks[0]?.id).toBe('package@packages/p-00:test')
+    expect(result.tasks.at(-1)?.id).toBe('package@packages/p-63:test')
+    expect(result.diagnostics).toContainEqual({
+      source: 'package',
+      code: 'workspace-limit',
+      message: 'Workspace discovery returned the first 64 package directories.',
     })
   })
 })

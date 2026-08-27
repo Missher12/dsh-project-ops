@@ -226,7 +226,7 @@ describe('Project Ops Cordis plugin', () => {
         return {
           kind: 'background',
           jobId: ctx.jobs.start({
-            kind: 'bash',
+            kind: platformExecutor,
             label: args.command,
             ...(exec.agent === undefined ? {} : { owner: exec.agent }),
             run: () => ({
@@ -278,7 +278,7 @@ describe('Project Ops Cordis plugin', () => {
         return {
           kind: 'background',
           jobId: ctx.jobs.start({
-            kind: 'bash',
+            kind: platformExecutor,
             label: args.command,
             ...(exec.agent === undefined ? {} : { owner: exec.agent }),
             run: () => ({ cancel() {}, done, readOutput: () => {

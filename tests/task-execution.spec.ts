@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import type { ProjectTask } from '../src/contracts.ts'
 import {
   commandFor,
+  createJobReceipt,
   createReceipt,
   receiptContent,
   type ReceiptResult,
@@ -15,8 +16,11 @@ function packageTask(script = 'build:site'): ProjectTask {
     source: 'package',
     manifest: 'package.json',
     manifestDigest: 'a'.repeat(64),
+    workspace: '.',
+    purpose: 'build',
+    dependsOn: [],
     runnable: true,
-    invocation: { kind: 'package', manager: 'pnpm', script },
+    invocation: { kind: 'package', manager: 'pnpm', script, cwd: '.' },
   }
 }
 
@@ -76,6 +80,97 @@ describe('task execution helpers', () => {
     expect(content).toHaveLength(2)
     expect(content[0]).toEqual({ type: 'text', text: 'only once' })
     expect(content[1]).toMatchObject({ type: 'text' })
-    expect((content[1] as { text: string }).text).toContain('"receiptVersion": 1')
+    expect((content[1] as { text: string }).text).toContain('"receiptVersion": 2')
+  })
+
+  test('projects running and terminal Harness jobs into output-free receipts', () => {
+    const base = {
+      task: { ...packageTask(), workspace: 'packages/site' },
+      executorTool: 'bash' as const,
+      nestedCallId: 'outer:project-ops:1',
+      jobId: 'bash-7',
+      startedAt: '2026-08-28T01:00:00.000Z',
+      durationMs: 2_500,
+    }
+    const running = createJobReceipt({
+      ...base,
+      snapshot: {
+        id: 'bash-7',
+        kind: 'bash',
+        label: 'private command',
+        status: 'running',
+        startedAt: Date.parse(base.startedAt),
+        reported: false,
+      },
+    })
+    const succeeded = createJobReceipt({
+      ...base,
+      snapshot: {
+        id: 'bash-7',
+        kind: 'bash',
+        label: 'private command',
+        status: 'completed',
+        detail: 'exit code: 0',
+        startedAt: Date.parse(base.startedAt),
+        finishedAt: Date.parse(base.startedAt) + 2_000,
+        reported: true,
+      },
+      output: 'safe output',
+    })
+    const failed = createJobReceipt({
+      ...base,
+      snapshot: {
+        id: 'bash-7',
+        kind: 'bash',
+        label: 'private command',
+        status: 'completed',
+        detail: 'exit code: 3',
+        startedAt: Date.parse(base.startedAt),
+        finishedAt: Date.parse(base.startedAt) + 2_000,
+        reported: true,
+      },
+    })
+    const blocked = createJobReceipt({
+      ...base,
+      snapshot: {
+        id: 'bash-7',
+        kind: 'bash',
+        label: 'private command',
+        status: 'completed',
+        detail: 'exit code: 1',
+        startedAt: Date.parse(base.startedAt),
+        finishedAt: Date.parse(base.startedAt) + 2_000,
+        reported: true,
+      },
+      output: '[sandbox: file access denied under workspace-write mode]',
+    })
+    const aborted = createJobReceipt({
+      ...base,
+      snapshot: {
+        id: 'bash-7',
+        kind: 'bash',
+        label: 'private command',
+        status: 'killed',
+        detail: 'signal: SIGTERM',
+        startedAt: Date.parse(base.startedAt),
+        finishedAt: Date.parse(base.startedAt) + 2_000,
+        reported: true,
+      },
+    })
+
+    expect(running).toMatchObject({
+      receiptVersion: 2,
+      executionMode: 'background',
+      outcome: 'running',
+      jobId: 'bash-7',
+      workspace: 'packages/site',
+      purpose: 'build',
+    })
+    expect(succeeded).toMatchObject({ outcome: 'succeeded', exitCode: 0 })
+    expect(failed).toMatchObject({ outcome: 'failed', exitCode: 3 })
+    expect(blocked).toMatchObject({ outcome: 'blocked', exitCode: 1 })
+    expect(aborted).toMatchObject({ outcome: 'aborted' })
+    expect(JSON.stringify([running, succeeded, failed, blocked, aborted])).not.toContain('private command')
+    expect(JSON.stringify(succeeded)).not.toContain('safe output')
   })
 })

@@ -160,7 +160,7 @@ try {
   }))
   invariant(Array.isArray(packed) && packed.length === 1, 'npm pack returned an unexpected manifest')
   const archive = join(packDir, packed[0].filename)
-  const entries = run('tar', ['-tzf', archive]).trim().split('\n').sort()
+  const entries = run('tar', ['-tzf', archive]).trim().split(/\r?\n/u).sort()
   invariant(JSON.stringify(entries) === JSON.stringify(expectedEntries), `archive entries differ from whitelist: ${entries.join(', ')}`)
 
   const archiveText = expectedEntries
